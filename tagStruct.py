@@ -66,6 +66,21 @@ class Tag(object):
         self.save()
         return listOfDives
     
+    def getDiveLocations(self,fileName):
+        """
+        Uses the lat/lon coordinates for each time stamp in fileName to assign (lat/lon) to each dive,
+        specifically to the starting location of each dive.
+        returns and array of tuples [(lat1, lon1), (lat2, lon2) ...], where each tuple corresponds to the dives
+        in self.dives.
+        """
+        locations = []
+        for dive in self.dives:
+            pass
+
+
+        self.locations = locations
+        return locations
+
     def addVelocityColumn(self):
         dives = self.dives
         depthChannelIndex = self.findIndex("depth")
