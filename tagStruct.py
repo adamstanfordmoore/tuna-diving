@@ -3,6 +3,8 @@ import numpy as np
 import pickle
 import re
 import math
+import glob
+from datetime import datetime, timedelta
 
 class Tag(object):
     """A Tag is an object with properties that we will probably want when dealing with analysis. 
@@ -65,21 +67,50 @@ class Tag(object):
         self.threshold = threshold
         self.save()
         return listOfDives
-    
-    def getDiveLocations(self,fileName):
+
+
+    def getDiveLocations(self,gis_data_path = "data/GIS/"):
         """
         Uses the lat/lon coordinates for each time stamp in fileName to assign (lat/lon) to each dive,
-        specifically to the starting location of each dive.
+        specifically to the starting location of each dive.  If the GIS data does not exist for the given date
+        it looks at neighboring dates both ahead and behind starting with 1 day ahead then 1 behind then 2 days ahead, etc.
+        up to 20 days ahead (MAX_DAYS_AHEAD_TO_CHECK).
+        Takes in an optional path to where the GIS folder is stored.
         returns and array of tuples [(lat1, lon1), (lat2, lon2) ...], where each tuple corresponds to the dives
         in self.dives.
         """
+        MAX_DAYS_AHEAD_TO_CHECK = 20  #in case the dive day is not in the GIS data, look at subsequent days
+
+        #searches for first 18 digits of tag number in folder
+        possibleFiles = glob.glob(gis_data_path + self.name[0:18] + '*')
+        assert len(possibleFiles) > 0, "No GIS data file found for tag: " + self.name
+        fileName = possibleFiles[0]
+        pdf = pd.read_csv(fileName, usecols = ['Longitude','Latitude','Date_'])
+        pdf = pdf.set_index(['Date_'])
+
+        timeCol = self.colNames.index('time')
+        assert timeCol != -1, "Time column not found"
         locations = []
         for dive in self.dives:
-            pass
-
+            startTime = dive.iloc[0,timeCol]
+            date = startTime.split()[0]
+            found = False
+            #check for given date with offset [0,+1,-1,+2,-2,...]. 0 is the date given in tag, +1 is next day.
+            for day_ahead in [(-1)**i * (i//2) for i in range(1,MAX_DAYS_AHEAD_TO_CHECK*2)]:
+                gis_date = (datetime.strptime(date, '%m/%d/%Y') + timedelta(days=day_ahead)).strftime('%-m/%-d/%Y')
+                if gis_date in pdf.index:
+                    lat = pdf.loc[gis_date,'Latitude']
+                    lon = pdf.loc[gis_date,'Longitude']
+                    locations.append((lat,lon))
+                    found = True
+                    break
+            if (not found):
+                locations.append((0,0))
+                print("Unfound GIS data for tag",self.name,"and date",date)
 
         self.locations = locations
         return locations
+
 
     def addVelocityColumn(self):
         dives = self.dives
