@@ -91,9 +91,11 @@ class Tag(object):
         timeCol = self.colNames.index('time')
         assert timeCol != -1, "Time column not found"
         locations = []
+        diveDates = [] #list of dates each dive occurred
         for dive in self.dives:
             startTime = dive.iloc[0,timeCol]
             date = startTime.split()[0]
+            diveDates.append(date)
             found = False
             #check for given date with offset [0,+1,-1,+2,-2,...]. 0 is the date given in tag, +1 is next day.
             for day_ahead in [(-1)**i * (i//2) for i in range(1,MAX_DAYS_AHEAD_TO_CHECK*2)]:
@@ -109,6 +111,7 @@ class Tag(object):
                 print("Unfound GIS data for tag",self.name,"and date",date)
 
         self.locations = locations
+        self.diveDates = diveDates
         return locations
 
 
