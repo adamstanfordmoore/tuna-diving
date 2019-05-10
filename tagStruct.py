@@ -25,7 +25,6 @@ class Tag(object):
         self.name = self.getName()
         self.load()
        # self.save()
-
         
 
     def save(self):
@@ -36,7 +35,56 @@ class Tag(object):
         pickle.dump(self,f) 
         f.close()
 
-    def getDives(self, threshold):
+    def getInterval(self):
+        """
+        Returns the number of seconds between measurements of the tag.
+        Mostly 15 seconds but 120 seconds on some tags.
+        Just looks at first two rows
+        """
+        timeColumnIndex = self.findIndex('time')
+        time1 = self.__raw__.iloc[0,timeColumnIndex].split()[1]
+        time2 = self.__raw__.iloc[1,timeColumnIndex].split()[1]
+        t1 = datetime.strptime(time1, '%H:%M:%S')
+        t2 = datetime.strptime(time2, '%H:%M:%S')
+        diff = abs(t2 - t1)
+        self.interval = diff.seconds
+        return diff.seconds
+
+    def getDays(self,startDayTime='00:00:00',endDayTime='23:59:45'):
+        '''
+        Segments timeseries into separate days similar to getDives().
+        Does not include incomplete days or days that don't end on the endDayTime.
+        One day goes from 00:00:00 to 23:59:45 pm
+
+        '''
+        timeColumnIndex = self.findIndex('time')
+        timeCol = self.colNames[timeColumnIndex]
+        startRow = -1
+        endRow = -1
+        listOfDays = list()
+        toDrop = []
+        for row in self.__raw__.itertuples(index=True, name='Pandas'):
+            if type(row[2]) == float and np.isnan(row[2]):
+                toDrop.append(row[0])
+                continue
+            currTime = getattr(row, timeCol)
+            if currTime.find(startDayTime) != -1:
+                startRow = row[0]
+                toDrop = []
+            elif currTime.find(endDayTime) != -1:
+                if startRow == -1:
+                    print("Missed Start of Day While Segmenting. SKIPPING DAY")
+                    continue
+                endRow = row[0]
+                wholeDive = self.__raw__.iloc[startRow:endRow, ].drop(toDrop, axis=0) #This will be a pandas dataframe...beware of numpy-like indexing
+                listOfDays.append(wholeDive)
+                startRow = -1
+                endRow = -1
+                toDrop = []
+        self.days = listOfDays
+        return listOfDays
+
+    def getDives(self, threshold, min_dive_length_minutes = 30):
         '''
         Returns list of nonoverlapping dives in the tag deployment that correspond to dives.
         Also sets self.dives to be this list as well.  
@@ -44,25 +92,32 @@ class Tag(object):
              Threshold: Depth at which one should start and end dives with. 
         Potential hyperparameter: How long should the dive be? Truncate samples based on this. 
         
-        '''
-
+        '''        
+        interval = self.getInterval()
         depthColumnIndex = self.findIndex('depth')
         depthChannel = self.colNames[depthColumnIndex]
         onDive = False
         startTime = "fjdkslfd"
         endTime = "fdjsklfd"
         listOfDives = list()
+        toDrop = [] #keeps track of bad rows and drops them
         for row in self.__raw__.itertuples(index=True, name='Pandas'):
+            if type(row[2]) == float and np.isnan(row[2]):
+                toDrop.append(row[0])
+                continue
             currDepth = getattr(row, depthChannel)
             if not(onDive and currDepth >= threshold):
                 if (not(onDive)) and currDepth >= threshold:
                     onDive = True 
                     startTime =  row[0]
+                    toDrop = []
                 elif onDive and currDepth < threshold:
                     onDive = False
                     endTime = row[0]
-                    wholeDive = self.__raw__.iloc[startTime:endTime, ] #This will be a pandas dataframe...beware of numpy-like indexing
-                    listOfDives.append(wholeDive)
+                    if (endTime - startTime)*interval > min_dive_length_minutes * 60 :
+                        wholeDive = self.__raw__.iloc[startTime:endTime, ].drop(toDrop, axis=0) #This will be a pandas dataframe...beware of numpy-like indexing
+                        listOfDives.append(wholeDive)
+                    toDrop = []
         self.dives = listOfDives
         self.threshold = threshold
         self.save()
@@ -116,18 +171,21 @@ class Tag(object):
 
 
     def addVelocityColumn(self):
+        interval = self.getInterval()
         dives = self.dives
         depthChannelIndex = self.findIndex("depth")
         for i in range(0, len(dives)):
             dive = dives[i]
             depthChannel = dive[self.colNames[depthChannelIndex]].values
             velocity = np.asarray([0] + [depthChannel[i] - depthChannel[i-1] for i in range(1, len(depthChannel))])
+            velocity = velocity / interval
             dive["velocity"] = pd.Series(velocity , index=dive.index)
             dives[i] = dive
         print("finished")
         self.colNames = list(self.colNames) + ["velocity"]
         self.dives = dives
     
+
     def find_nearest(self, array,value):
         '''
         Performs fast binary search on array with value in-hand. 
